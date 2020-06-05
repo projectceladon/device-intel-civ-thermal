@@ -36,11 +36,11 @@
  * the Guest OS.
  */
 #define debug_buf 0
-int start_connection(struct sockaddr_vm sa_listen, int listen_fd, socklen_t socklen_client);
+int start_connection(struct sockaddr_vm sa_listen, int listen_fd, socklen_t socklen_client, int *m_acpidsock);
 int client_fd = 0;
 
 int get_max_zones() {
-	char filename[40] = {0};
+	char filename[45] = {0};
 	int count = 0;
 
 	while(1) {
@@ -90,7 +90,7 @@ void read_sysfs_values(char *base_path, char *filename, void *buf, int len, int 
 
 void populate_zone_info (struct zone_info *zone, int zone_no) {
 	char base_path[120] = "/sys/class/thermal/thermal_zone";
-	char buf[50];
+	char buf[50] = {0};
 	sprintf(base_path, "/sys/class/thermal/thermal_zone%d", zone_no);
 #if debug_buf
 	printf("Reading %s/temperature \n", base_path);
@@ -232,10 +232,9 @@ out:
 	return -1;
 }
 
-int start_connection(struct sockaddr_vm sa_listen, int listen_fd, socklen_t socklen_client) {
+int start_connection(struct sockaddr_vm sa_listen, int listen_fd, socklen_t socklen_client, int *m_acpidsock) {
 	int ret = 0;
 	struct sockaddr_vm sa_client;
-	int m_acpidsock = 0;
 	struct sockaddr_un m_acpidsockaddr;
 	fprintf(stderr, "Thermal utility listening on cid(%d), port(%d)\n", sa_listen.svm_cid, sa_listen.svm_port);
 	if (listen(listen_fd, 32) != 0) {
@@ -253,8 +252,8 @@ int start_connection(struct sockaddr_vm sa_listen, int listen_fd, socklen_t sock
 	fprintf(stderr, "Thermal utility connected from guest(%d)\n", sa_client.svm_cid);
 
 	/* Connect to acpid socket */
-	m_acpidsock = socket(AF_UNIX, SOCK_STREAM, 0);
-	if (m_acpidsock < 0) {
+	*m_acpidsock = socket(AF_UNIX, SOCK_STREAM, 0);
+	if (*m_acpidsock < 0) {
 		perror("new acpidsocket failed");
 		ret = -2;
 		goto out;
@@ -262,27 +261,14 @@ int start_connection(struct sockaddr_vm sa_listen, int listen_fd, socklen_t sock
 
 	m_acpidsockaddr.sun_family = AF_UNIX;
 	strcpy(m_acpidsockaddr.sun_path,"/var/run/acpid.socket");
-	if(connect(m_acpidsock, (struct sockaddr *)&m_acpidsockaddr, 108)<0)
+	if(connect(*m_acpidsock, (struct sockaddr *)&m_acpidsockaddr, 108)<0)
 	{
 		/* can't connect */
 		perror("connect acpidsocket failed");
 		ret = -2;
 		goto out;
 	}
-	goto leave;
 out:
-	if(listen_fd >= 0)
-	{
-		printf("Closing listen_fd\n");
-		close(listen_fd);
-	}
-
-	if(m_acpidsock >= 0)
-	{
-		printf("Closing acpisocket\n");
-		close(m_acpidsock);
-	}
-leave:
 	return ret;
 }
 
@@ -292,6 +278,7 @@ int main()
 	int listen_fd = 0;
 	int ret = 0;
 	int return_value = 0;
+	int m_acpidsock = 0;
 
 	struct sockaddr_vm sa_listen = {
 		.svm_family = AF_VSOCK,
@@ -314,13 +301,24 @@ int main()
 	}
 
 start:
-	ret = start_connection(sa_listen, listen_fd, socklen_client);
-	if (ret == -1)
+	ret = start_connection(sa_listen, listen_fd, socklen_client, &m_acpidsock);
+	if (ret < 0)
 		goto out;
 	return_value = send_pkt();
 	if (return_value == -1)
 		goto start;
 out:
+	if(listen_fd >= 0)
+	{
+		printf("Closing listen_fd\n");
+		close(listen_fd);
+	}
+
+	if(m_acpidsock >= 0)
+	{
+		printf("Closing acpisocket\n");
+		close(m_acpidsock);
+	}
 	return ret;
 }
 #endif
