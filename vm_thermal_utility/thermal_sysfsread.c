@@ -29,7 +29,7 @@
 #include <sys/un.h>
 #include "thermal_pkt.h"
 
-#define TEST_PORT 1235
+#define TEST_PORT 14096
 
 /*
  * Set below debug_buf to 1 if one wants to debug the buffer sent to
