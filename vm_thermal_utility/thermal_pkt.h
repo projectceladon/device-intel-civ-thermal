@@ -23,7 +23,7 @@
 #define GPU 1
 #define BATTERY 2
 #define SKIN 3
-#define UNKNOWN_TYPE 65535
+#define UNKNOWN_TYPE -1
 
 #define TEMPERATURE "temp"
 #define TYPE "type"
@@ -39,7 +39,7 @@ struct zone_info {
 	uint32_t trip_1;
 	uint32_t trip_2;
 	uint16_t number;
-	uint16_t type;
+	int16_t type;
 };
 
 struct header {
