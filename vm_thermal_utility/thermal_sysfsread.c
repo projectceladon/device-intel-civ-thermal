@@ -31,12 +31,7 @@
 
 #define TEST_PORT 14096
 
-/*
- * Set below debug_buf to 1 if one wants to debug the buffer sent to
- * the Guest OS.
- */
-#define debug_buf 0
-int start_connection(struct sockaddr_vm sa_listen, int listen_fd, socklen_t socklen_client, int *m_acpidsock);
+int start_connection(struct sockaddr_vm sa_listen, int listen_fd, socklen_t socklen_client);
 int client_fd = 0;
 
 int get_max_zones() {
@@ -44,13 +39,10 @@ int get_max_zones() {
 	int count = 0;
 
 	while(1) {
-		sprintf(filename, "/sys/class/thermal/thermal_zone%d", count);
+		snprintf(filename, sizeof(filename), "/sys/class/thermal/thermal_zone%d", count);
 		count++;
-		sprintf(filename + strlen(filename), "/type");
+		snprintf(filename + strlen(filename), sizeof(filename), "/type");
 		if(!access( filename, R_OK)) {
-#if debug_buf
-			printf("Found zone %d \n", count-1);
-#endif
 			continue;
 		}
 		else
@@ -91,14 +83,8 @@ void read_sysfs_values(char *base_path, char *filename, void *buf, int len, int 
 void populate_zone_info (struct zone_info *zone, int zone_no) {
 	char base_path[120] = "/sys/class/thermal/thermal_zone";
 	char buf[50] = {0};
-	sprintf(base_path, "/sys/class/thermal/thermal_zone%d", zone_no);
-#if debug_buf
-	printf("Reading %s/temperature \n", base_path);
-#endif
+	snprintf(base_path, sizeof(base_path), "/sys/class/thermal/thermal_zone%d", zone_no);
 	read_sysfs_values(base_path, TEMPERATURE, &zone->temperature, sizeof(zone->temperature), 1);
-#if debug_buf
-	printf("Reading %s/type \n", base_path);
-#endif
 	read_sysfs_values(base_path, TYPE, buf, 50, 0);
 	zone->number = zone_no;
 	if (strstr(buf, "x86_pkg_temp") != NULL) {
@@ -139,7 +125,7 @@ void print_zone_values(struct zone_info zone) {
  */
 
 void init_header_struct(struct header *head, uint32_t maximum_zone_no, int size_temp_type, uint16_t notifyID) {
-	strcpy((char *)head->intelipcid, INTELIPCID);
+	strncpy((char *)head->intelipcid, INTELIPCID, sizeof(head->intelipcid));
 	head->notifyid = notifyID;
 	if (notifyID == 1)
 		head->length = maximum_zone_no * sizeof(struct zone_info);
@@ -150,43 +136,23 @@ void init_header_struct(struct header *head, uint32_t maximum_zone_no, int size_
 	return;
 }
 
-#if debug_buf
-int main() {
-#else
 int send_pkt() {
-#endif
 	char msgbuf[1024] = {0};
 	int maximum_zone_no = 0;
 	struct header head;
 	int return_value = 0;
 	int i = 0;
-#if debug_buf
-	printf("Starting the thermal utility\n");
-#endif
 	maximum_zone_no = get_max_zones();
-#if debug_buf
-	printf("Total number of zones: %d\n\n",maximum_zone_no);
-#endif
 	struct zone_info zone[maximum_zone_no];
 	init_header_struct(&head, maximum_zone_no, 0, 1);
 	memcpy(msgbuf, (const unsigned char *)&head, sizeof(head));
 	for (i = 0; i < maximum_zone_no; i++) {
-#if debug_buf
-		printf("Populating zone_info%d\n", i);
-#endif
 		populate_zone_info(&zone[i], i);
-#if debug_buf
-		print_zone_values(zone[i]);
-#endif
 		memcpy(msgbuf + sizeof(head) + (i * sizeof(struct zone_info)), (const unsigned char *)&zone[i], sizeof(zone[i]));
 	}
-#if debug_buf
-	printf("Sending initial values\n");
-#else
 	return_value = send(client_fd, msgbuf, sizeof(msgbuf), MSG_DONTWAIT);
 	if (return_value == -1)
 		goto out;
-#endif
 	init_header_struct(&head, maximum_zone_no, sizeof(zone[i].temperature) + sizeof(zone[i].type), 2);
 	char base_path[120] = "/sys/class/thermal/thermal_zone";
 	int size_one = sizeof(head) + sizeof(maximum_zone_no);
@@ -205,80 +171,43 @@ int send_pkt() {
 		memcpy(msgbuf + sizeof(head), (const unsigned char *)&maximum_zone_no, sizeof(maximum_zone_no));
 		uint32_t temperature = 0;
 		for (i = 0; i < maximum_zone_no; i++) {
-			sprintf(base_path, "/sys/class/thermal/thermal_zone%d", i);
+			snprintf(base_path, sizeof(base_path), "/sys/class/thermal/thermal_zone%d", i);
 			memcpy(msgbuf + size_one + (i * size_two), (const unsigned char*)&zone[i].type, sizeof(zone[i].type));
 			read_sysfs_values(base_path, TEMPERATURE, &temperature, sizeof(temperature), 1);
 			memcpy(msgbuf + size_one + (i * size_two + sizeof(zone[i].type)), (const unsigned char*)&temperature, sizeof(temperature));
 		}
-#if debug_buf
-		printf("Sending values every second\n");
-		for (i = 0; i < maximum_zone_no; i++) {
-			uint32_t tem = 0;
-			uint16_t typ = 0;
-			memcpy((unsigned char*)&typ, msgbuf + size_one + (i * size_two), sizeof(typ));
-			memcpy((unsigned char*)&tem, msgbuf + size_one + (i * size_two) + sizeof(typ), sizeof(typ));
-			printf("Sending temperature %d for type %d for zone %d\n", tem, typ, zone[i].number);
-			if (i == 3)
-				printf("\n");
-		}
-#else
 		return_value = send(client_fd, msgbuf, sizeof(msgbuf), MSG_DONTWAIT);
 		if (return_value == -1)
 			goto out;
-#endif
 	}
 	return 0;
 out:
 	return -1;
 }
 
-int start_connection(struct sockaddr_vm sa_listen, int listen_fd, socklen_t socklen_client, int *m_acpidsock) {
-	int ret = 0;
+int start_connection(struct sockaddr_vm sa_listen, int listen_fd, socklen_t socklen_client) {
 	struct sockaddr_vm sa_client;
-	struct sockaddr_un m_acpidsockaddr;
 	fprintf(stderr, "Thermal utility listening on cid(%d), port(%d)\n", sa_listen.svm_cid, sa_listen.svm_port);
 	if (listen(listen_fd, 32) != 0) {
 		fprintf(stderr, "listen failed\n");
-		ret = -1;
-		goto out;
+		return -1;
 	}
 
 	client_fd = accept(listen_fd, (struct sockaddr*)&sa_client, &socklen_client);
 	if(client_fd < 0) {
 		fprintf(stderr, "accept failed\n");
-		ret = -1;
-		goto out;
+		return -1;
 	}
 	fprintf(stderr, "Thermal utility connected from guest(%d)\n", sa_client.svm_cid);
 
-	/* Connect to acpid socket */
-	*m_acpidsock = socket(AF_UNIX, SOCK_STREAM, 0);
-	if (*m_acpidsock < 0) {
-		perror("new acpidsocket failed");
-		ret = -2;
-		goto out;
-	}
-
-	m_acpidsockaddr.sun_family = AF_UNIX;
-	strcpy(m_acpidsockaddr.sun_path,"/var/run/acpid.socket");
-	if(connect(*m_acpidsock, (struct sockaddr *)&m_acpidsockaddr, 108)<0)
-	{
-		/* can't connect */
-		perror("connect acpidsocket failed");
-		ret = -2;
-		goto out;
-	}
-out:
-	return ret;
+	return 0;
 }
 
-#if !debug_buf
 int main()
 {
 	int listen_fd = 0;
 	int ret = 0;
 	int return_value = 0;
-	int m_acpidsock = 0;
 
 	struct sockaddr_vm sa_listen = {
 		.svm_family = AF_VSOCK,
@@ -301,7 +230,7 @@ int main()
 	}
 
 start:
-	ret = start_connection(sa_listen, listen_fd, socklen_client, &m_acpidsock);
+	ret = start_connection(sa_listen, listen_fd, socklen_client);
 	if (ret < 0)
 		goto out;
 	return_value = send_pkt();
@@ -314,11 +243,5 @@ out:
 		close(listen_fd);
 	}
 
-	if(m_acpidsock >= 0)
-	{
-		printf("Closing acpisocket\n");
-		close(m_acpidsock);
-	}
 	return ret;
 }
-#endif
