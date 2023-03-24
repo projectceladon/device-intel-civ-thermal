@@ -76,10 +76,18 @@ void read_sysfs_values(char *base_path, char *filename, void *buf, int len, int 
 		return;
 	}
 
-	if (flag==0)
-		fread(buf, len, 1, fp);
-	else
-    		fscanf (fp, "%d", (int*)buf);  /* read/validate value */
+	if (flag==0) {
+	    if (fread(buf, len, 1, fp) == EOF) {
+                fclose (fp);
+                return;
+	    }
+	}
+	else {
+            if (fscanf (fp, "%d", (int*)buf) < 0) {
+                fclose (fp);
+                return;
+            }
+	}
 	fclose (fp);
 	return;
 }
